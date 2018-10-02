@@ -1,0 +1,12 @@
+[package]
+name = "sled-web-table"
+version = "0.1.0"
+authors = ["mitchmindtree <mitchell.nordine@gmail.com>"]
+description = "An extension of the sled-web crate that provides a `Table` API for the client."
+
+[dependencies]
+bincode = "1"
+bytekey = { git = "https://github.com/mitchmindtree/bytekey", branch = "serde_and_stable" }
+futures = "0.1"
+serde = "1"
+sled-web = "0.1"
