@@ -9,4 +9,4 @@ bincode = "1"
 bytekey = { git = "https://github.com/mitchmindtree/bytekey", branch = "serde_and_stable" }
 futures = "0.1"
 serde = "1"
-sled-web = "0.1"
+sled-web = "0.2"
