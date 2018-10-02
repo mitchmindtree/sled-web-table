@@ -607,3 +607,15 @@ where
 {
     future::result(write_id(id))
 }
+
+/// Given a slice of bytes representing a table ID and key, read the ID and return the remaining
+/// key bytes.
+pub fn read_id_from_front<I>(id_key_bytes: &[u8]) -> bytekey::de::Result<(I, &[u8])>
+where
+    I: Id,
+{
+    let mut cursor = std::io::Cursor::new(id_key_bytes);
+    let id = bytekey::deserialize_from(&mut cursor)?;
+    let key_bytes = &id_key_bytes[cursor.position() as usize..];
+    Ok((id, key_bytes))
+}
