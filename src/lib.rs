@@ -132,7 +132,7 @@ where
         let client = self.client.clone();
         write_key_future::<T>(k)
             .join(write_id_future(&T::ID))
-            .map(move |(id_bytes, key_bytes)| {
+            .map(move |(key_bytes, id_bytes)| {
                 let id_len = id_bytes.len();
                 client
                     .scan(key_bytes)
@@ -537,9 +537,9 @@ where
     T: Table,
     F: Fn(T::Key, Option<T::Value>, T::Value) -> T::Value,
 {
-    let id_bytes = write_id(&T::ID).expect("failed to write table ID");
-    let (_id, key) = id_key.split_at(id_bytes.len());
-    let key = bytekey::deserialize(key).expect("failed to deserialize key");
+    let (id, key_bytes) = read_id_from_front::<T::Id>(id_key).expect("failed to read table ID");
+    assert!(id == T::ID, "Table::ID mismatch during merge");
+    let key = bytekey::deserialize(key_bytes).expect("failed to deserialize key");
     let old = old.map(|old| bincode::deserialize(old).expect("failed to deserialize value"));
     let new = bincode::deserialize(new).expect("failed to deserialize value");
     let merged = f(key, old, new);
@@ -590,7 +590,6 @@ where
 {
     future::result(entry_from_bytes::<T>(k, v))
 }
-
 
 /// Serialize the given table ID to its byte representation.
 pub fn write_id<I>(id: &I) -> Result<Vec<u8>>
