@@ -86,62 +86,6 @@ where
             })
     }
 
-    /// Iterate over the byte representation of all key/value pairs within the table.
-    ///
-    /// The yielded bytes for each entry are laid out as follows:
-    ///
-    /// ```txt
-    /// ([T::ID, T::Key], [T::Value])
-    /// ```
-    pub fn iter_bytes(&self) -> impl Stream<Item = (Vec<u8>, Vec<u8>), Error = Error> {
-        let client = self.client.clone();
-        write_id_future(&T::ID)
-            .map(move |id_bytes| {
-                let id_len = id_bytes.len();
-                client
-                    .scan(id_bytes.clone())
-                    .map_err(Error::SledWeb)
-                    .filter(move |(ref id_k, _v)| id_k[..id_len] == id_bytes[..])
-            })
-            .flatten_stream()
-    }
-
-    /// Iterate over all key value pairs in the table.
-    pub fn iter(&self) -> impl Stream<Item = (T::Key, T::Value), Error = Error> {
-        let iter_bytes = self.iter_bytes();
-        write_id_future(&T::ID)
-            .map(move |id_bytes| {
-                let id_len = id_bytes.len();
-                iter_bytes
-                    .and_then(move |(id_k, v)| {
-                        let k = &id_k[id_len..];
-                        entry_from_bytes_future::<T>(k, &v)
-                    })
-            })
-            .flatten_stream()
-    }
-
-    /// Iterate over the byte representation of all key/value pairs within the table.
-    ///
-    /// The yielded bytes for each entry are laid out as follows:
-    ///
-    /// ```txt
-    /// ([T::ID, T::Key], [T::Value])
-    /// ```
-    pub fn scan_bytes(&self, k: &T::Key) -> impl Stream<Item = (Vec<u8>, Vec<u8>), Error = Error> {
-        let client = self.client.clone();
-        write_key_future::<T>(k)
-            .join(write_id_future(&T::ID))
-            .map(move |(key_bytes, id_bytes)| {
-                let id_len = id_bytes.len();
-                client
-                    .scan(key_bytes)
-                    .map_err(Error::SledWeb)
-                    .filter(move |(ref id_k, _v)| id_k[..id_len] == id_bytes[..])
-            })
-            .flatten_stream()
-    }
-
     /// Iterate over the byte representation of all key/value pairs within the table within the
     /// given range.
     ///
@@ -160,21 +104,6 @@ where
         let end = write_key_future::<T>(end);
         start.join(end)
             .map(move |(start, end)| client.scan_range(start, end).map_err(Error::SledWeb))
-            .flatten_stream()
-    }
-
-    /// Iterate over tuples of keys and values, starting at the provided key.
-    pub fn scan(&self, key: &T::Key) -> impl Stream<Item = (T::Key, T::Value), Error = Error> {
-        let scan_bytes = self.scan_bytes(key);
-        write_id_future(&T::ID)
-            .map(move |id_bytes| {
-                let id_len = id_bytes.len();
-                scan_bytes
-                    .and_then(move |(id_k, v)| {
-                        let k = &id_k[id_len..];
-                        entry_from_bytes_future::<T>(k, &v)
-                    })
-            })
             .flatten_stream()
     }
 
@@ -320,15 +249,6 @@ where
                 })
             })
     }
-
-    /// The size of the table on disk in bytes.
-    ///
-    /// TODO: This implementation currently requires downloading every entry from the table. This
-    /// method should be moved upstream to the `sled_web` crate.
-    pub fn size_bytes(&self) -> impl Future<Item = usize, Error = Error> {
-        self.iter_bytes()
-            .fold(0, |acc, (k, v)| future::ok::<_, Error>(acc + k.len() + v.len()))
-    }
 }
 
 impl<T> Reader<T>
@@ -336,6 +256,76 @@ where
     T: Table,
     T::Id: NextId,
 {
+    /// Iterate over the byte representation of all key/value pairs within the table.
+    ///
+    /// The yielded bytes for each entry are laid out as follows:
+    ///
+    /// ```txt
+    /// ([T::ID, T::Key], [T::Value])
+    /// ```
+    pub fn iter_bytes(&self) -> impl Stream<Item = (Vec<u8>, Vec<u8>), Error = Error> {
+        let client = self.client.clone();
+        let next_id = T::ID.next_id();
+        write_id_future(&T::ID)
+            .join(write_id_future(&next_id))
+            .map(move |(id_bytes, next_id_bytes)| {
+                client
+                    .scan_range(id_bytes, next_id_bytes)
+                    .map_err(Error::SledWeb)
+            })
+            .flatten_stream()
+    }
+
+    /// Iterate over all key value pairs in the table.
+    pub fn iter(&self) -> impl Stream<Item = (T::Key, T::Value), Error = Error> {
+        let iter_bytes = self.iter_bytes();
+        write_id_future(&T::ID)
+            .map(move |id_bytes| {
+                let id_len = id_bytes.len();
+                iter_bytes
+                    .and_then(move |(id_k, v)| {
+                        let k = &id_k[id_len..];
+                        entry_from_bytes_future::<T>(k, &v)
+                    })
+            })
+            .flatten_stream()
+    }
+
+    /// Iterate over the byte representation of all key/value pairs within the table.
+    ///
+    /// The yielded bytes for each entry are laid out as follows:
+    ///
+    /// ```txt
+    /// ([T::ID, T::Key], [T::Value])
+    /// ```
+    pub fn scan_bytes(&self, k: &T::Key) -> impl Stream<Item = (Vec<u8>, Vec<u8>), Error = Error> {
+        let client = self.client.clone();
+        let next_id = T::ID.next_id();
+        write_key_future::<T>(k)
+            .join(write_id_future(&next_id))
+            .map(move |(key_bytes, next_id_bytes)| {
+                client
+                    .scan_range(key_bytes, next_id_bytes)
+                    .map_err(Error::SledWeb)
+            })
+            .flatten_stream()
+    }
+
+    /// Iterate over tuples of keys and values, starting at the provided key.
+    pub fn scan(&self, key: &T::Key) -> impl Stream<Item = (T::Key, T::Value), Error = Error> {
+        let scan_bytes = self.scan_bytes(key);
+        write_id_future(&T::ID)
+            .map(move |id_bytes| {
+                let id_len = id_bytes.len();
+                scan_bytes
+                    .and_then(move |(id_k, v)| {
+                        let k = &id_k[id_len..];
+                        entry_from_bytes_future::<T>(k, &v)
+                    })
+            })
+            .flatten_stream()
+    }
+
     /// Return the greatest entry that exists within the table.
     pub fn max(&self) -> impl Future<Item = Option<(T::Key, T::Value)>, Error = Error>
     where
@@ -356,6 +346,15 @@ where
                     }
                 })
             })
+    }
+
+    /// The size of the table on disk in bytes.
+    ///
+    /// TODO: This implementation currently requires downloading every entry from the table. This
+    /// method should be moved upstream to the `sled_web` crate.
+    pub fn size_bytes(&self) -> impl Future<Item = usize, Error = Error> {
+        self.iter_bytes()
+            .fold(0, |acc, (k, v)| future::ok::<_, Error>(acc + k.len() + v.len()))
     }
 }
 
