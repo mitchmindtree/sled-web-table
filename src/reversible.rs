@@ -1,7 +1,7 @@
-use {Error, Table};
 use hyper::rt::Future;
 use sled_web;
 use std::ops;
+use {Error, Table};
 
 /// An extension to the **Table** trait that allows for bi-directional conversions with some other
 /// table.
@@ -53,7 +53,9 @@ where
     /// Also removes the reverse entry from the reverse table.
     pub fn del(&self, key: &T::Key) -> impl Future<Item = Option<T::Value>, Error = Error> {
         let rev = self.reverse_table.clone();
-        self.table.del(key).and_then(move |opt| opt.map(|v| rev.del(&v).map(|_| v)))
+        self.table
+            .del(key)
+            .and_then(move |opt| opt.map(|v| rev.del(&v).map(|_| v)))
     }
 
     /// Return the inverse of this table.
@@ -63,7 +65,10 @@ where
     {
         let reverse_table = self.table.clone();
         let table = self.reverse_table.clone();
-        Writer { table, reverse_table }
+        Writer {
+            table,
+            reverse_table,
+        }
     }
 }
 
@@ -76,7 +81,10 @@ where
     pub fn inv(&self) -> Reader<T::ReverseTable> {
         let reverse_table = self.table.clone();
         let table = self.reverse_table.clone();
-        Reader { table, reverse_table }
+        Reader {
+            table,
+            reverse_table,
+        }
     }
 }
 
@@ -117,7 +125,10 @@ where
     fn from(w: Writer<T>) -> Self {
         let table = w.table.clone().into();
         let reverse_table = w.reverse_table.clone().into();
-        Reader { table, reverse_table }
+        Reader {
+            table,
+            reverse_table,
+        }
     }
 }
 
@@ -128,7 +139,10 @@ where
     fn clone(&self) -> Self {
         let table = self.table.clone();
         let reverse_table = self.reverse_table.clone();
-        Reader { table, reverse_table }
+        Reader {
+            table,
+            reverse_table,
+        }
     }
 }
 
@@ -139,7 +153,10 @@ where
     fn clone(&self) -> Self {
         let table = self.table.clone();
         let reverse_table = self.reverse_table.clone();
-        Writer { table, reverse_table }
+        Writer {
+            table,
+            reverse_table,
+        }
     }
 }
 

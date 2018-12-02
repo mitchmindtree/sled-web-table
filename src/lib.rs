@@ -9,9 +9,9 @@ use hyper::rt::{Future, Stream};
 use serde::{Deserialize, Serialize};
 pub use sled_web::{hyper, sled};
 use std::error::Error as StdError;
-use std::{fmt, ops};
 use std::marker::PhantomData;
 use std::result::Result as StdResult;
+use std::{fmt, ops};
 
 pub mod reversible;
 
@@ -74,16 +74,15 @@ where
     /// Retrieve a value from the **Tree** if it exists.
     pub fn get(&self, key: &T::Key) -> impl Future<Item = Option<T::Value>, Error = Error> {
         let client = self.client.clone();
-        write_key_future::<T>(key)
-            .and_then(move |key_bytes| {
-                client
-                    .get(key_bytes)
-                    .map_err(Error::SledWeb)
-                    .and_then(|opt| match opt {
-                        None => Ok(None),
-                        Some(bytes) => Ok(Some(bincode::deserialize(&bytes)?)),
-                    })
-            })
+        write_key_future::<T>(key).and_then(move |key_bytes| {
+            client
+                .get(key_bytes)
+                .map_err(Error::SledWeb)
+                .and_then(|opt| match opt {
+                    None => Ok(None),
+                    Some(bytes) => Ok(Some(bincode::deserialize(&bytes)?)),
+                })
+        })
     }
 
     /// Iterate over the byte representation of all key/value pairs within the table within the
@@ -102,7 +101,8 @@ where
         let client = self.client.clone();
         let start = write_key_future::<T>(start);
         let end = write_key_future::<T>(end);
-        start.join(end)
+        start
+            .join(end)
             .map(move |(start, end)| client.scan_range(start, end).map_err(Error::SledWeb))
             .flatten_stream()
     }
@@ -117,11 +117,10 @@ where
         write_id_future(&T::ID)
             .map(move |id_bytes| {
                 let id_len = id_bytes.len();
-                scan_bytes
-                    .and_then(move |(id_k, v)| {
-                        let k = &id_k[id_len..];
-                        entry_from_bytes_future::<T>(k, &v)
-                    })
+                scan_bytes.and_then(move |(id_k, v)| {
+                    let k = &id_k[id_len..];
+                    entry_from_bytes_future::<T>(k, &v)
+                })
             })
             .flatten_stream()
     }
@@ -282,11 +281,10 @@ where
         write_id_future(&T::ID)
             .map(move |id_bytes| {
                 let id_len = id_bytes.len();
-                iter_bytes
-                    .and_then(move |(id_k, v)| {
-                        let k = &id_k[id_len..];
-                        entry_from_bytes_future::<T>(k, &v)
-                    })
+                iter_bytes.and_then(move |(id_k, v)| {
+                    let k = &id_k[id_len..];
+                    entry_from_bytes_future::<T>(k, &v)
+                })
             })
             .flatten_stream()
     }
@@ -317,11 +315,10 @@ where
         write_id_future(&T::ID)
             .map(move |id_bytes| {
                 let id_len = id_bytes.len();
-                scan_bytes
-                    .and_then(move |(id_k, v)| {
-                        let k = &id_k[id_len..];
-                        entry_from_bytes_future::<T>(k, &v)
-                    })
+                scan_bytes.and_then(move |(id_k, v)| {
+                    let k = &id_k[id_len..];
+                    entry_from_bytes_future::<T>(k, &v)
+                })
             })
             .flatten_stream()
     }
@@ -353,8 +350,9 @@ where
     /// TODO: This implementation currently requires downloading every entry from the table. This
     /// method should be moved upstream to the `sled_web` crate.
     pub fn size_bytes(&self) -> impl Future<Item = usize, Error = Error> {
-        self.iter_bytes()
-            .fold(0, |acc, (k, v)| future::ok::<_, Error>(acc + k.len() + v.len()))
+        self.iter_bytes().fold(0, |acc, (k, v)| {
+            future::ok::<_, Error>(acc + k.len() + v.len())
+        })
     }
 }
 
@@ -366,13 +364,15 @@ where
     pub fn set(&self, key: &T::Key, value: &T::Value) -> impl Future<Item = (), Error = Error> {
         let client = self.client.clone();
         write_key_future::<T>(key)
-            .join(future::result(bincode::serialize(value).map_err(From::from)))
+            .join(future::result(
+                bincode::serialize(value).map_err(From::from),
+            ))
             .and_then(move |(k, v)| client.set(k, v).map_err(From::from))
     }
 
     /// Remove a value from the **Tree** if it exists.
     pub fn del(&self, key: &T::Key) -> impl Future<Item = Option<T::Value>, Error = Error> {
-        let client= self.client.clone();
+        let client = self.client.clone();
         write_key_future::<T>(key)
             .and_then(move |k| client.del(k).map_err(From::from))
             .and_then(|opt| {
@@ -395,25 +395,21 @@ where
     ) -> impl Future<Item = StdResult<(), Option<T::Value>>, Error = Error> {
         let client = self.client.clone();
         let key = write_key_future::<T>(key);
-        let write_opt_value_future = |v: Option<&T::Value>| {
-            match v {
-                None => future::ok(None),
-                Some(v) => future::result(bincode::serialize(v).map(Some).map_err(From::from)),
-            }
+        let write_opt_value_future = |v: Option<&T::Value>| match v {
+            None => future::ok(None),
+            Some(v) => future::result(bincode::serialize(v).map(Some).map_err(From::from)),
         };
         let old = write_opt_value_future(old);
         let new = write_opt_value_future(new);
         key.join3(old, new)
             .and_then(move |(k, o, n)| client.cas(k, o, n).map_err(From::from))
-            .and_then(|res| {
-                match res {
-                    Ok(()) => future::ok(Ok(())),
-                    Err(None) => future::ok(Err(None)),
-                    Err(Some(b)) => match bincode::deserialize(&b) {
-                        Ok(v) => future::ok(Err(Some(v))),
-                        Err(err) => future::err(From::from(err)),
-                    }
-                }
+            .and_then(|res| match res {
+                Ok(()) => future::ok(Ok(())),
+                Err(None) => future::ok(Err(None)),
+                Err(Some(b)) => match bincode::deserialize(&b) {
+                    Ok(v) => future::ok(Err(Some(v))),
+                    Err(err) => future::err(From::from(err)),
+                },
             })
     }
 
@@ -421,7 +417,9 @@ where
     pub fn merge(&self, key: &T::Key, value: &T::Value) -> impl Future<Item = (), Error = Error> {
         let client = self.client.clone();
         write_key_future::<T>(key)
-            .join(future::result(bincode::serialize(value).map_err(From::from)))
+            .join(future::result(
+                bincode::serialize(value).map_err(From::from),
+            ))
             .and_then(move |(k, v)| client.merge(k, v).map_err(From::from))
     }
 }
